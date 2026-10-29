@@ -33,8 +33,8 @@ app.add_middleware(
 # ==========================================
 # 1. CONEXÃO COM O SUPABASE
 # ==========================================
-SUPABASE_URL = "https://qhwjgfdwpaihisexgrlg.supabase.co"
-SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFod2pnZmR3cGFpaGlzZXhncmxnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODczMTUwNzgsImV4cCI6MjEwMjg5MTA3OH0.OkyJbYRR1wr34cFF5xLvvV_4emnCWKgQnOdJiXavjg8"
+SUPABASE_URL = 
+SUPABASE_KEY = 
 
 
 try:
