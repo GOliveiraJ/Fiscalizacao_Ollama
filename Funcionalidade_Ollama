@@ -1,0 +1,173 @@
+## 2. Código Completo e Comentado da IA Local no `main.py` (v2.0)
+
+No último `main.py`, a rota `/api/chat` estava sem a fusão em tempo real com a tabela `produtos_customizados` do Supabase e sem o gatilho de **Alerta Vermelho** para CNPJs clandestinos. 
+
+Substitua a função `motor_juridico_chat` no final do seu **`backend_ggtab/main.py`** por esta versão completa e documentada:
+
+```python
+# =====================================================================
+# MOTOR JURÍDICO HÍBRIDO: RAG DETERMINÍSTICO + IA LOCAL (OLLAMA LLAMA 3.2)
+# =====================================================================
+@app.post("/api/chat", response_model=ChatResponse)
+def motor_juridico_chat(request: ChatRequest):
+    """
+    Pipeline Híbrido de Inteligência Fiscal:
+    1. Higieniza o prompt do fiscal e extrai radicais de marcas e dígitos de CNPJ via Regex.
+    2. Unifica a Base Oficial da ANVISA (Hardcoded) com a Base Dinâmica na Nuvem (Supabase).
+    3. Gera o Dossiê Corporativo determinístico (zero alucinação de dados cadastrais).
+    4. Injeta o resultado no System Prompt do LLM Local (Ollama - llama3.2) com temperatura 0.1
+       para emissão de parecer fundamentado nas RDCs 855/2024, 840/2023, 896/2024 e Lei 6.437/77.
+    """
+    pergunta = request.prompt.lower()
+    prompt_limpo = pergunta.replace(".", "").replace("/", "").replace("-", "")
+    numeros_pergunta = re.sub(r'\D', '', prompt_limpo)
+    palavras_pergunta = set(re.findall(r'\b\w+\b', pergunta))
+    
+    # Stopwords ignoradas para evitar falsos positivos na busca por nome comercial
+    palavras_ignoradas = {
+        'para', 'como', 'sabor', 'menta', 'qual', 'quais', 'onde', 'legal', 'ilegal', 
+        'cnpj', 'cnpjs', 'empresa', 'empresas', 'marca', 'marcas', 'produto', 'produtos', 
+        'registro', 'registrado', 'anvisa', 'pode', 'vender', 'apreensao', 'autuacao'
+    }
+
+    # 1. Fusão em Tempo Real: Base Nativa ANVISA + Nuvem Customizada (Supabase)
+    banco_dinamico = copy.deepcopy(DB_PRODUTOS_BASE)
+    if HAS_SUPABASE:
+        try:
+            resp_supa = supabase.table('produtos_customizados').select('*').execute()
+            for row in resp_supa.data:
+                cat = row.get('categoria', '🍂 TABACOS E DERIVADOS')
+                tipo = row.get('tipo', 'Outros')
+                prod = row.get('produto', '')
+                cnpj = row.get('cnpj', 'Sem CNPJ')
+                st = row.get('status', 'Ilegal/Apreensão')
+                
+                if cat not in banco_dinamico:
+                    banco_dinamico[cat] = {}
+                if tipo not in banco_dinamico[cat]:
+                    banco_dinamico[cat][tipo] = {}
+                
+                val_final = cnpj if ("Regular" in st and "Ilegal" not in st) else f"{cnpj} [Ilegal]"
+                banco_dinamico[cat][tipo][prod] = val_final
+        except Exception as e:
+            print(f"Aviso: Falha ao mesclar Supabase no RAG da IA: {e}")
+
+    # 2. Varredura Determinística por CNPJ ou Nome de Marca/Fabricante
+    cnpjs_alvo = set()
+    empresas_alvo_ilegais = set()
+    
+    for cat, tipos in banco_dinamico.items():
+        for tipo, produtos in tipos.items():
+            for prod_full, cnpj in produtos.items():
+                cnpj_num = re.sub(r'\D', '', cnpj)
+                match_parenteses = re.match(r'^(.*?)\s*\((.*?)\)$', prod_full)
+                marca = match_parenteses.group(1).strip().lower() if match_parenteses else prod_full.lower()
+                empresa = match_parenteses.group(2).strip().lower() if match_parenteses else ""
+                empresa_limpa = (
+                    empresa.replace(" ltda", "").replace(" eireli", "")
+                    .replace(" s.a.", "").replace(" - me", "").replace(".", "").strip()
+                )
+
+                is_match = False
+                # Match por CNPJ (mínimo de 8 dígitos numéricos coincidindo com a raiz ou CNPJ completo)
+                if len(numeros_pergunta) >= 8 and cnpj_num and (numeros_pergunta in cnpj_num or cnpj_num in numeros_pergunta):
+                    is_match = True
+                else:
+                    # Match por tokens de Marca ou Razão Social
+                    for p in palavras_pergunta:
+                        if p not in palavras_ignoradas and len(p) > 3:
+                            if p in marca.split() or (empresa_limpa and p in empresa_limpa.split()):
+                                is_match = True
+                                break
+                
+                if is_match:
+                    if "Ilegal" not in cnpj:
+                        cnpjs_alvo.add(cnpj)
+                    else:
+                        empresas_alvo_ilegais.add(marca)
+
+    # 3. Agrupamento do Portfólio da Empresa / Marca Encontrada
+    empresas_encontradas = {}
+    for cat, tipos in banco_dinamico.items():
+        for tipo, produtos in tipos.items():
+            for prod_full, cnpj in produtos.items():
+                match_parenteses = re.match(r'^(.*?)\s*\((.*?)\)$', prod_full)
+                marca_exibicao = match_parenteses.group(1).strip() if match_parenteses else prod_full
+                empresa_exibicao = match_parenteses.group(2).strip() if match_parenteses else "Marca Mapeada / Sem Fabricante"
+                
+                if cnpj in cnpjs_alvo or marca_exibicao.lower() in empresas_alvo_ilegais:
+                    chave = cnpj if "Ilegal" not in cnpj else marca_exibicao
+                    if chave not in empresas_encontradas:
+                        status_str = "✅ REGISTRADO NA ANVISA" if "Ilegal" not in cnpj else "❌ ILEGAL / CLANDESTINO (Apreensão Imediata)"
+                        empresas_encontradas[chave] = {
+                            "empresa": empresa_exibicao,
+                            "cnpj": cnpj.replace(" [Ilegal]", ""),
+                            "status": status_str,
+                            "produtos": []
+                        }
+                    empresas_encontradas[chave]["produtos"].append(f"- {marca_exibicao} ({tipo})")
+
+    # 4. Construção do Dossiê Visual (Front-end) e do Contexto RAG (Ollama)
+    texto_banco_para_tela = ""
+    contexto_banco_para_ia = "Consulta jurídica geral (nenhum produto específico citado)."
+    gatilhos_busca = {"marca", "produto", "produtos", "cnpj", "registro", "registrado", "pod", "vape", "cigarro", "charuto", "narguile", "palheiro"}
+    
+    if empresas_encontradas:
+        texto_banco_para_tela = "🏢 DOSSIÊ CORPORATIVO GGTAB / ANVISA\n" + ("=" * 42) + "\n"
+        contexto_banco_para_ia = ""
+        for chave, dados in empresas_encontradas.items():
+            texto_banco_para_tela += (
+                f"• Fabricante: {dados['empresa']}\n"
+                f"• CNPJ: {dados['cnpj']}\n"
+                f"• Status Sanitário: {dados['status']}\n"
+                f"• Portfólio Identificado ({len(dados['produtos'])} itens):\n"
+            )
+            texto_banco_para_tela += "\n".join(dados['produtos'][:12]) + "\n\n"
+            contexto_banco_para_ia += (
+                f"Fabricante: {dados['empresa']} | CNPJ: {dados['cnpj']} | "
+                f"Status no Banco da ANVISA: {dados['status']} | "
+                f"Exemplos de Produtos: {', '.join(dados['produtos'][:5])}.\n"
+            )
+    elif len(numeros_pergunta) >= 11 or gatilhos_busca.intersection(palavras_pergunta):
+        texto_banco_para_tela = (
+            "🚨 ALERTA VERMELHO — RASTREIO GGTAB\n"
+            "O CNPJ ou marca consultada NÃO CONSTA na base de produtos regulares da ANVISA.\n"
+            "Enquadramento Automático: Produto CLANDESTINO / SEM REGISTRO (Sujeito a Apreensão)."
+        )
+        contexto_banco_para_ia = (
+            "ALERTA: O fiscal consultou um produto ou CNPJ que NÃO EXISTE na base de registros ativos da ANVISA. "
+            "Trata-se de produto clandestino/sem registro sanitário (infração à RDC 896/2024 e Lei 6.437/1977) "
+            "ou Dispositivo Eletrônico para Fumar proibido (RDC 855/2024)."
+        )
+
+    # 5. Chamada ao LLM Local via Ollama (Llama 3.2)
+    system_prompt = f"""Você é o Procurador e Consultor Jurídico Especialista da GGTAB (ANVISA).
+Sua missão é orientar o fiscal em campo de forma direta, técnica, estruturada em tópicos curtos e estritamente baseada na legislação sanitária brasileira:
+1. RDC nº 855/2024: Proíbe fabricação, importação, comercialização, distribuição, armazenamento, transporte e propaganda de Dispositivos Eletrônicos para Fumar (DEF / Vapes / Pods / Tabaco Aquecido). Medida: Apreensão imediata e autuação.
+2. RDC nº 840/2023 e Lei nº 9.294/1996: Proíbe qualquer propaganda comercial de produtos fumígenos (mesmo que o produto tenha registro ativo na ANVISA), permitindo apenas a exposição padronizada nas tabelas de preços com advertências sanitárias.
+3. RDC nº 896/2024: Exige registro sanitário prévio na ANVISA para qualquer produto fumígeno derivado do tabaco. Produtos sem registro são clandestinos e devem ser apreendidos.
+4. Lei Federal nº 6.437/1977: Tipifica as infrações à legislação sanitária federal e estabelece as penalidades (advertência, apreensão, inutilização, interdição e multa).
+
+RESULTADO DO RASTREIO AUTOMÁTICO NO BANCO DE DADOS DA ANVISA PARA ESTA PERGUNTA:
+[{contexto_banco_para_ia}]
+
+Com base nesses dados do banco, oriente o fiscal sobre o enquadramento legal exato e qual medida administrativa tomar na loja."""
+
+    try:
+        resposta_ollama = ollama.chat(
+            model='llama3.2',
+            messages=[
+                {'role': 'system', 'content': system_prompt},
+                {'role': 'user', 'content': request.prompt}
+            ],
+            options={'temperature': 0.1}
+        )
+        parecer_ia = resposta_ollama['message']['content']
+    except Exception as e:
+        parecer_ia = (
+            f"⚠️ **Motor Ollama Local Indisponível no momento:** `{e}`\n\n"
+            f"Certifique-se de que o serviço local está ativo executando `ollama run llama3.2` no terminal. "
+            f"O Dossiê Corporativo acima foi extraído diretamente da base de dados da GGTAB."
+        )
+
+    return ChatResponse(dossie_banco=texto_banco_para_tela, parecer_ia=parecer_ia)
