@@ -63,14 +63,58 @@ POST /api/exportar-excel: Gera a Planilha .xlsx Multi-Abas, isolando cada estabe
 4. 🤖 Motor Jurídico Híbrido (/api/chat)
 Combina RAG determinístico (varredura de CNPJs e portfólios de empresas na base da ANVISA + Supabase) com geração de pareceres via Ollama (Llama 3.2), entregando um Dossiê Corporativo estruturado junto à fundamentação legal (RDC 855/2024, RDC 840/2023, RDC 896/2024 e Lei 6.437/77).
 
+## 🧠 Arquitetura da IA Local: Motor Jurídico Híbrido (Ollama + RAG Determinístico)
+
+ollama pull llama3.2
+ollama serve
+
+Diferente de soluções convencionais que dependem de APIs externas pagas (como OpenAI/Claude) e enviam dados sensíveis de fiscalização para servidores de terceiros, esta plataforma implementa um **Motor Jurídico Híbrido 100% Local (On-Premise)** utilizando **Ollama (`llama3.2`)**.
+
+### 🔒 Por que IA Local na Fiscalização Sanitária?
+1. **Soberania e Sigilo de Dados:** Informações sobre operações em andamento, estabelecimentos autuados e cruzamento de CNPJs permanecem estritamente na máquina/servidor da **GGTAB/ANVISA**, garantindo conformidade total com a LGPD e o sigilo de processos administrativos.
+2. **Custo Zero de Tokenização:** Consultas ilimitadas pelos fiscais sem custos de API por requisição.
+3. **Zero Alucinação Cadastral (RAG Determinístico):** Modelos de linguagem puros costumam "alucinar" números de CNPJ ou status de registro. Para eliminar esse risco, criamos um pipeline em **duas camadas**:
+
+### ⚙️ Fluxo de Execução do Pipeline Híbrido (`/api/chat`)
+
+```text
+[Pergunta do Fiscal] 
+       │
+       ▼
+┌─────────────────────────────────────────────────────────────────┐
+│ 1. CAMADA DETERMINÍSTICA (Python + Regex + Base ANVISA/Supabase)│
+│ • Extrai possíveis CNPJs (com ou sem pontuação) e marcas.       │
+│ • Varre o banco nativo da ANVISA + banco dinâmico do Supabase.  │
+│ • Monta o "Dossiê Corporativo" exato (Fabricante, Portfólio e   │
+│   Status) ou dispara o "Alerta Vermelho" de produto clandestino.│
+└─────────────────────────────────────────────────────────────────┘
+       │ (Injeta o Contexto Auditado no System Prompt)
+       ▼
+┌─────────────────────────────────────────────────────────────────┐
+│ 2. CAMADA GENERATIVA LOCAL (Ollama — Llama 3.2, Temp = 0.1)     │
+│ • Recebe o dossiê verificado + Arcabouço Legal da GGTAB:        │
+│   - RDC 855/2024 (Proibição de DEF / Vapes / Pods)              │
+│   - RDC 840/2023 e Lei 9.294/96 (Propaganda Irregular)          │
+│   - RDC 896/2024 (Registro Sanitário Obrigatório)               │
+│   - Lei 6.437/1977 (Infrações Sanitárias Federais)              │
+│ • Redige o parecer técnico-jurídico orientando a ação em campo. │
+└─────────────────────────────────────────────────────────────────┘
+       │
+       ▼
+[Interface Next.js: Renderiza Card de Dossiê Oficial + Parecer Jurídico]
+
 🚀 Como Executar o Ambiente CompletoPasso 1: Iniciar o Back-end (FastAPI)Entre no diretório do servidor Python:Bashcd backend_ggtab
 Instale as dependências:Bashpip install fastapi uvicorn pydantic supabase ollama pandas openpyxl fpdf2 pillow pytesseract
 Configure suas credenciais SUPABASE_URL e SUPABASE_KEY no arquivo main.py.Inicie o servidor Uvicorn na porta 8000:Bashpython -m uvicorn main:app --reload
+
+
 📌 A documentação interativa da API (Swagger UI) estará disponível em: http://127.0.0.1:8000/docsPasso 2: Iniciar o Front-end (Next.js)Em um novo terminal, acesse a pasta do Front-end:Bashcd frontend_ggtab
 Instale os pacotes Node.js (caso ainda não tenha instalado):Bashnpm install
 npm install lucide-react
 Inicie o servidor de desenvolvimento na porta 3000:Bashnpm run dev
 Acesse no navegador: http://localhost:3000
+
+
 🔌 Principais Endpoints da API (FastAPI)
 Método:   Rota:   Descrição:
 GET/api/dashboardRetorna os KPIs globais consolidados do Supabase.
