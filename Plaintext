@@ -1,0 +1,12 @@
+ggtab-fiscalizacao-v2/
+├── .gitignore
+├── README.md
+├── backend_ggtab/
+│   ├── .env.example
+│   ├── requirements.txt
+│   └── main.py
+└── frontend_ggtab/
+    ├── package.json
+    └── src/
+        └── app/
+            └── page.tsx
