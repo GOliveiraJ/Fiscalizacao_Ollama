@@ -1,0 +1,1662 @@
+'use client';
+
+import { useState, useEffect, useMemo } from 'react';
+import { 
+  BarChart3, Search, ClipboardCheck, FolderOpen, Bot, Eye, 
+  ShieldCheck, AlertTriangle, PackageSearch, Store, Activity,
+  LogOut, BadgeCheck, User, Lock, LogIn, Plus, X, Camera, 
+  CheckCircle, FileSpreadsheet, FileText, Trash2, Save, ScanLine,
+  PieChart, Building2, TrendingUp, Filter
+} from 'lucide-react';
+
+export default function AppLayout() {
+  // ==========================================
+  // 1. ESTADOS DE AUTENTICAÇÃO E LOGS
+  // ==========================================
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [fiscalName, setFiscalName] = useState('');
+  const [inputUser, setInputUser] = useState('');
+  const [inputPass, setInputPass] = useState('');
+  const [inputName, setInputName] = useState('');
+  const [loginError, setLoginError] = useState('');
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
+
+  const [activeTab, setActiveTab] = useState('dashboard');
+
+  const registrarLog = async (fiscal: string, acao: string, detalhes: string) => {
+    try {
+      await fetch('http://127.0.0.1:8000/api/log', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fiscal, acao, detalhes }),
+      });
+    } catch (e) {
+      console.error("Erro ao registrar log", e);
+    }
+  };
+
+  const handleLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoginError('');
+    setIsLoggingIn(true);
+    await new Promise(r => setTimeout(r, 500));
+
+    if (inputUser === 'GGTAB' && inputPass === 'CCTAB' && inputName.trim() !== '') {
+      setFiscalName(inputName.trim());
+      setIsAuthenticated(true);
+      await registrarLog(inputName.trim(), 'Login', 'Acesso concedido à plataforma.');
+    } else {
+      setLoginError('Credenciais inválidas ou nome não preenchido.');
+    }
+    setIsLoggingIn(false);
+  };
+
+  const handleLogout = async () => {
+    await registrarLog(fiscalName, 'Logout', 'Utilizador saiu do sistema.');
+    setIsAuthenticated(false);
+    setInputPass('');
+  };
+
+  // ==========================================
+  // 2. ESTADOS DO DASHBOARD, OPERAÇÕES E LOGS
+  // ==========================================
+  const [dashData, setDashData] = useState({ total_operacoes: 0, total_lojas: 0, total_itens: 0, total_ilegais: 0 });
+  const [loadingDash, setLoadingDash] = useState(false);
+  const [logsAuditoria, setLogsAuditoria] = useState<any[]>([]);
+  const [loadingLogs, setLoadingLogs] = useState(false);
+
+  // Filtros Interativos do BI (Slicers)
+  const [filtroOperacaoBI, setFiltroOperacaoBI] = useState<string>('TODAS');
+  const [filtroNaturezaBI, setFiltroNaturezaBI] = useState<string>('TODAS');
+
+  // Histórico e Operações
+  const [historicoOps, setHistoricoOps] = useState<any[]>([]);
+  const [opSelecionadaIdx, setOpSelecionadaIdx] = useState<number>(0);
+  const [loadingHistorico, setLoadingHistorico] = useState(false);
+  const [baixandoArquivo, setBaixandoArquivo] = useState(false);
+  const [lojaAlvoEdicaoIdx, setLojaAlvoEdicaoIdx] = useState<number | null>(null);
+
+  const carregarHistoricoNuvem = async () => {
+    setLoadingHistorico(true);
+    try {
+      const res = await fetch('http://127.0.0.1:8000/api/operacoes');
+      if (res.ok) {
+        const data = await res.json();
+        const opsNuvem = data.operacoes || [];
+        setHistoricoOps(prev => {
+          const mapaLocal = new Map(prev.map(o => [o.operacao_id, o]));
+          opsNuvem.forEach((opNuvem: any) => {
+            if (!mapaLocal.has(opNuvem.operacao_id)) {
+              mapaLocal.set(opNuvem.operacao_id, opNuvem);
+            }
+          });
+          return Array.from(mapaLocal.values());
+        });
+      }
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setLoadingHistorico(false);
+    }
+  };
+
+  const carregarDashboard = async () => {
+    setLoadingDash(true);
+    try {
+      await carregarHistoricoNuvem();
+      const res = await fetch('http://127.0.0.1:8000/api/dashboard');
+      if (res.ok) setDashData(await res.json());
+    } catch (error) {
+      console.error(error);
+    } finally {
+      setLoadingDash(false);
+    }
+  };
+
+  const carregarLogs = async () => {
+    setLoadingLogs(true);
+    try {
+      const res = await fetch('http://127.0.0.1:8000/api/logs');
+      if (res.ok) {
+        const data = await res.json();
+        setLogsAuditoria(data.logs || []);
+      }
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setLoadingLogs(false);
+    }
+  };
+
+  // ==========================================
+  // 3. ESTADOS DE PRODUTOS (BASE + SUPABASE)
+  // ==========================================
+  const [produtos, setProdutos] = useState<any[]>([]);
+  const [loadingProdutos, setLoadingProdutos] = useState(false);
+  const [buscaProduto, setBuscaProduto] = useState('');
+  const [showModalCadastro, setShowModalCadastro] = useState(false);
+
+  const [cadMacro, setCadMacro] = useState('');
+  const [cadTipo, setCadTipo] = useState('');
+  const [cadNovoTipo, setCadNovoTipo] = useState('');
+  const [cadMarca, setCadMarca] = useState('');
+  const [cadCnpj, setCadCnpj] = useState('');
+
+  const carregarProdutos = async () => {
+    setLoadingProdutos(true);
+    try {
+      const res = await fetch('http://127.0.0.1:8000/api/produtos');
+      if (res.ok) {
+        const data = await res.json();
+        setProdutos(data.produtos || []);
+      }
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setLoadingProdutos(false);
+    }
+  };
+
+  useEffect(() => {
+    if (isAuthenticated) {
+      carregarProdutos();
+      if (activeTab === 'dashboard') carregarDashboard();
+      if (activeTab === 'historico') carregarHistoricoNuvem();
+      if (activeTab === 'logs') carregarLogs();
+    }
+  }, [activeTab, isAuthenticated]);
+
+  const tiposPadraoDEF = [
+    "Cigarros eletrônicos (Vapes e Pods)",
+    "Cigarros aquecidos ou tabaco aquecido",
+    "Vaporizadores de ervas secas",
+    "Produtos híbridos",
+    "Essências e Juices (Líquidos para DEF)"
+  ];
+
+  const tiposPadraoTabaco = [
+    "🚬 Cigarros (Filtro/Kretek)",
+    "🕴️ Charutos",
+    "🌿 Fumo Desfiado",
+    "🌾 Cigarro de Palha",
+    "🌬️ Fumo para Narguilé",
+    "🪈 Fumo para Cachimbo"
+  ];
+
+  const opcoesTipoCadastro = cadMacro.includes('DEF') 
+    ? [...tiposPadraoDEF, "+ Criar Novo Tipo"] 
+    : (cadMacro.includes('Tabacos') ? [...tiposPadraoTabaco, "+ Criar Novo Tipo"] : []);
+  
+  const statusAutomaticoCadastro = cadMacro.includes('Registrados') ? 'Regular' : (cadMacro !== '' ? 'Ilegal/Apreensão' : '');
+
+  const submeterCadastroGlobal = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!cadMacro || !cadTipo || !cadMarca) return;
+    const tipoFinal = cadTipo === '+ Criar Novo Tipo' ? cadNovoTipo : cadTipo;
+    const chaveDb = cadMacro.includes('DEF') ? "💨 DEF (Dispositivos Eletrônicos para Fumar)" : "🍂 TABACOS E DERIVADOS";
+
+    try {
+      const res = await fetch('http://127.0.0.1:8000/api/produtos', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          categoria: chaveDb, tipo: tipoFinal, produto: cadMarca,
+          cnpj: cadCnpj || 'Sem CNPJ', status: statusAutomaticoCadastro
+        })
+      });
+      if (res.ok) {
+        setShowModalCadastro(false);
+        setCadMacro(''); setCadTipo(''); setCadMarca(''); setCadCnpj(''); setCadNovoTipo('');
+        await carregarProdutos();
+        await registrarLog(fiscalName, 'Novo Produto Cadastrado', `Marca '${cadMarca}' salva na nuvem.`);
+        alert(`✅ Marca '${cadMarca}' adicionada com sucesso!`);
+      }
+    } catch (e) {
+      alert("Erro de conexão com a API.");
+    }
+  };
+
+  const produtosFiltradosTabela = produtos.filter(p => 
+    p.produto?.toLowerCase().includes(buscaProduto.toLowerCase()) || 
+    p.cnpj?.toLowerCase().includes(buscaProduto.toLowerCase()) ||
+    p.tipo?.toLowerCase().includes(buscaProduto.toLowerCase())
+  );
+
+  // ==========================================
+  // 4. ESTADOS DA NOVA FISCALIZAÇÃO + OCR
+  // ==========================================
+  const [operacaoId, setOperacaoId] = useState('');
+  const [lojasAuditadas, setLojasAuditadas] = useState<any[]>([]);
+  const [lojaAtiva, setLojaAtiva] = useState<any>(null);
+  const [isSyncing, setIsSyncing] = useState(false);
+
+  const [showModalLoja, setShowModalLoja] = useState(false);
+  const [formNumLoja, setFormNumLoja] = useState<number>(1);
+  const [formNomeLoja, setFormNomeLoja] = useState('');
+
+  const [showModalInfracao, setShowModalInfracao] = useState(false);
+  const [infMacro, setInfMacro] = useState('');
+  const [infTipo, setInfTipo] = useState('');
+  const [infProd, setInfProd] = useState('');
+  const [infQtd, setInfQtd] = useState<number>(1);
+  const [infNovoNome, setInfNovoNome] = useState('');
+  const [infNovoCnpj, setInfNovoCnpj] = useState('');
+  const [infNovoTipo, setInfNovoTipo] = useState('');
+
+  const [foto1Preview, setFoto1Preview] = useState<string | null>(null);
+  const [foto2Preview, setFoto2Preview] = useState<string | null>(null);
+  const [loadingOcr, setLoadingOcr] = useState(false);
+  const [ocrFeedback, setOcrFeedback] = useState('');
+
+  const isDef = infMacro.includes("DEF");
+  const isPropaganda = infMacro.includes("Propaganda") && !infMacro.includes("Apreensão e Propaganda");
+  const isIlegal = infMacro.includes("Irregulares");
+  const isAmbos = infMacro.includes("Apreensão e Propaganda");
+  const chaveDbInf = isDef ? "💨 DEF (Dispositivos Eletrônicos para Fumar)" : "🍂 TABACOS E DERIVADOS";
+
+  const tiposDinamicosNoBanco = Array.from(new Set(produtos.filter(p => p.categoria === chaveDbInf).map(p => p.tipo)));
+  const listaTiposBase = isDef 
+    ? Array.from(new Set([...tiposPadraoDEF, ...tiposDinamicosNoBanco]))
+    : Array.from(new Set([...tiposPadraoTabaco, ...tiposDinamicosNoBanco]));
+
+  const opcoesTipoInfracao = [...listaTiposBase];
+  if (isIlegal || isDef || isAmbos) opcoesTipoInfracao.push("⚠️ OUTRO TIPO / MARCA NOVA");
+
+  const isNovoTipoSelecionado = infTipo.includes("⚠️");
+  const produtosDoTipo = produtos.filter(p => p.categoria === chaveDbInf && p.tipo === infTipo);
+  let produtosFiltradosInfracao: any[] = [];
+  if (!isNovoTipoSelecionado && infTipo !== '') {
+    if (isPropaganda) produtosFiltradosInfracao = produtosDoTipo.filter(p => !p.status.includes("Ilegal"));
+    else if (isIlegal || isAmbos) produtosFiltradosInfracao = produtosDoTipo.filter(p => p.status.includes("Ilegal"));
+    else produtosFiltradosInfracao = produtosDoTipo;
+  }
+
+  const objProdutoSelecionado = produtosDoTipo.find(p => p.produto === infProd);
+  const cnpjBancoSelecionado = objProdutoSelecionado ? objProdutoSelecionado.cnpj : "Sem CNPJ";
+
+  // =========================================================================
+  // 5. MOTOR ANALÍTICO DE BI (CONSOLIDAÇÃO EM TEMPO REAL PARA OS GRÁFICOS)
+  // =========================================================================
+  const biAnalytics = useMemo(() => {
+    const todasOps = [...historicoOps];
+    if (operacaoId && (lojasAuditadas.length > 0 || lojaAtiva)) {
+      const lojasTemp = [...lojasAuditadas];
+      if (lojaAtiva) lojasTemp.push(lojaAtiva);
+      todasOps.unshift({ operacao_id: `${operacaoId} (Ativa)`, fiscal: fiscalName, lojas: lojasTemp });
+    }
+
+    const itensPlanos: any[] = [];
+    const opsUnicas = new Set<string>();
+    const lojasUnicas = new Set<string>();
+
+    todasOps.forEach(op => {
+      if (filtroOperacaoBI !== 'TODAS' && op.operacao_id !== filtroOperacaoBI) return;
+      opsUnicas.add(op.operacao_id);
+
+      (op.lojas || []).forEach((lj: any) => {
+        const nomeLojaFull = `Loja ${lj.numero} - ${lj.nome}`;
+        lojasUnicas.add(`${op.operacao_id}_${nomeLojaFull}`);
+
+        (lj.itens || []).forEach((it: any) => {
+          const st = String(it.status || '');
+          const cat = String(it.categoria || '');
+
+          // Classificação da Modalidade de Apreensão / Infração
+          let modalidade = 'Apreensão de Tabaco s/ Registro';
+          if (cat.includes('DEF')) modalidade = 'Apreensão de DEF (Vape/Pod)';
+          else if (st.includes('Apreensão e Propaganda')) modalidade = 'Apreensão + Propaganda Ilegal';
+          else if (st.includes('Propaganda')) modalidade = 'Autuação (Propaganda Irregular)';
+
+          if (filtroNaturezaBI !== 'TODAS' && modalidade !== filtroNaturezaBI) return;
+
+          // Extração inteligente da Empresa / Fabricante
+          const prodRaw = String(it.produto || 'Produto S/ Nome');
+          const matchFab = prodRaw.match(/^(.*?)\s*\((.*?)\)$/);
+          let marcaLimpa = prodRaw;
+          let empresaNome = 'Fabricante Não Identificado / Clandestino';
+
+          if (matchFab) {
+            marcaLimpa = matchFab[1].trim();
+            const parentesesTxt = matchFab[2].trim();
+            if (cat.includes('DEF') || it.cnpj === 'Sem CNPJ' || String(it.cnpj).includes('Ilegal')) {
+              empresaNome = `Clandestino / DEF (${marcaLimpa})`;
+            } else {
+              empresaNome = parentesesTxt;
+            }
+          } else if (it.cnpj && it.cnpj !== 'Sem CNPJ') {
+            empresaNome = `CNPJ: ${it.cnpj}`;
+          } else if (cat.includes('DEF')) {
+            empresaNome = `Importação Ilegal DEF (${marcaLimpa})`;
+          }
+
+          itensPlanos.push({
+            operacao_id: op.operacao_id,
+            loja: nomeLojaFull,
+            categoria: cat,
+            tipo: String(it.tipo || 'Outros').replace(/🚬 |🕴️ |🌿 |🌾 |🌬️ |🪈 /g, ''),
+            produto: prodRaw,
+            marca: marcaLimpa,
+            empresa: empresaNome,
+            cnpj: String(it.cnpj || 'Sem CNPJ'),
+            status: st,
+            modalidade,
+            quantidade: Number(it.quantidade || 0)
+          });
+        });
+      });
+    });
+
+    const totalItens = itensPlanos.reduce((acc, cur) => acc + cur.quantidade, 0);
+    const totalInfracoes = itensPlanos
+      .filter(i => i.status.toLowerCase().includes('ilegal') || i.status.toLowerCase().includes('propaganda'))
+      .reduce((acc, cur) => acc + cur.quantidade, 0);
+
+    const agruparESomar = (chave: string, limite = 6) => {
+      const mapa = new Map<string, { nome: string; qtd: number; extra?: string }>();
+      itensPlanos.forEach(item => {
+        const k = item[chave] || 'Não Informado';
+        const atual = mapa.get(k) || { nome: k, qtd: 0, extra: item.cnpj };
+        atual.qtd += item.quantidade;
+        mapa.set(k, atual);
+      });
+      return Array.from(mapa.values())
+        .sort((a, b) => b.qtd - a.qtd)
+        .slice(0, limite);
+    };
+
+    const porModalidade = agruparESomar('modalidade', 5);
+    const topProdutos = agruparESomar('marca', 6);
+    const topEmpresas = agruparESomar('empresa', 6);
+    const porTipo = agruparESomar('tipo', 6);
+    const topLojas = agruparESomar('loja', 5);
+
+    return {
+      listaOpsDisponiveis: todasOps.map(o => o.operacao_id),
+      totalOperacoes: opsUnicas.size || dashData.total_operacoes,
+      totalLojas: lojasUnicas.size || dashData.total_lojas,
+      totalItens: totalItens || dashData.total_itens,
+      totalInfracoes: totalInfracoes || dashData.total_ilegais,
+      temDadosDetalhados: itensPlanos.length > 0,
+      porModalidade,
+      topProdutos,
+      topEmpresas,
+      porTipo,
+      topLojas
+    };
+  }, [historicoOps, operacaoId, lojasAuditadas, lojaAtiva, filtroOperacaoBI, filtroNaturezaBI, dashData, fiscalName]);
+
+  // ==========================================
+  // 6. FUNÇÕES DE OPERAÇÃO, OCR, PDF E EXCEL
+  // ==========================================
+  const executarOcrCnpj = async () => {
+    if (!foto2Preview) return;
+    setLoadingOcr(true);
+    setOcrFeedback('');
+    try {
+      const res = await fetch('http://127.0.0.1:8000/api/ocr-cnpj', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ imagem_base64: foto2Preview })
+      });
+      const data = await res.json();
+      if (data.sucesso) {
+        setInfNovoCnpj(data.cnpj);
+        if (data.produto_sugerido && produtosFiltradosInfracao.some(p => p.produto === data.produto_sugerido)) {
+          setInfProd(data.produto_sugerido);
+        }
+        setOcrFeedback(`🤖 ${data.mensagem}`);
+      } else {
+        setOcrFeedback(`⚠️ ${data.mensagem}`);
+      }
+    } catch (e) {
+      setOcrFeedback('⚠️ Erro ao comunicar com o motor OCR no Python.');
+    } finally {
+      setLoadingOcr(false);
+    }
+  };
+
+  const iniciarOperacao = () => {
+    const agora = new Date();
+    const timestamp = `${agora.getFullYear()}${String(agora.getMonth() + 1).padStart(2, '0')}${String(agora.getDate()).padStart(2, '0')}${String(agora.getHours()).padStart(2, '0')}${String(agora.getMinutes()).padStart(2, '0')}`;
+    const id = `OP-${historicoOps.length + 1}-${timestamp}`;
+    setOperacaoId(id);
+    setLojasAuditadas([]);
+    registrarLog(fiscalName, 'Operação Iniciada', `Criou a ${id}`);
+  };
+
+  const entrarNaLoja = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!formNomeLoja.trim()) return;
+    setLojaAtiva({ numero: formNumLoja || 1, nome: formNomeLoja.trim(), itens: [] });
+    setShowModalLoja(false);
+    setFormNumLoja(prev => prev + 1);
+    setFormNomeLoja('');
+  };
+
+  const encerrarAuditoriaLoja = () => {
+    if (lojaAtiva) {
+      registrarLog(fiscalName, 'Loja Concluída', `Fechou a Loja ${lojaAtiva.numero}`);
+      setLojasAuditadas(prev => [...prev, lojaAtiva]);
+      setLojaAtiva(null);
+    }
+  };
+
+  const limparFormularioInfracao = () => {
+    setInfMacro(''); setInfTipo(''); setInfProd(''); setInfQtd(1);
+    setInfNovoNome(''); setInfNovoCnpj(''); setInfNovoTipo('');
+    setFoto1Preview(null); setFoto2Preview(null); setOcrFeedback('');
+    setLojaAlvoEdicaoIdx(null);
+  };
+
+  const confirmarInfracao = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!infMacro || !infTipo) return;
+
+    const horaAtual = new Date().toLocaleTimeString('pt-BR');
+    const limparEmojisTipo = (str: string) => str.replace(/🚬 |🕴️ |🌿 |🌾 |🌬️ |🪈 /g, "");
+    let novoItem: any = null;
+
+    if (isNovoTipoSelecionado || infProd === "⚠️ CADASTRAR NOVA MARCA ILEGAL") {
+      const nomeFinal = infNovoNome.trim() || "Produto S/ Nome";
+      const cnpjFinal = infNovoCnpj.trim() || "Sem CNPJ";
+      const tipoFinal = !isNovoTipoSelecionado ? infTipo : (infNovoTipo.trim() || "Outros");
+      const statusFinal = isAmbos ? "Ilegal/Apreensão e Propaganda" : "Ilegal/Apreensão";
+      const catLimpa = isAmbos ? "Tabaco Irregular (Sem Registro + Propaganda)" : (isIlegal ? "Tabaco Irregular (Sem Registro)" : "DEF");
+
+      try {
+        await fetch('http://127.0.0.1:8000/api/produtos', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ categoria: chaveDbInf, tipo: tipoFinal, produto: nomeFinal, cnpj: cnpjFinal, status: "Ilegal/Apreensão" })
+        });
+        await carregarProdutos();
+      } catch (err) {
+        console.error(err);
+      }
+
+      novoItem = {
+        categoria: catLimpa, tipo: limparEmojisTipo(tipoFinal), produto: nomeFinal,
+        status: statusFinal, cnpj: cnpjFinal, quantidade: infQtd, hora: horaAtual,
+        foto1_base64: foto1Preview, foto2_base64: foto2Preview
+      };
+    } else {
+      if (!infProd) return;
+      let statusBanco = "Ilegal/Apreensão";
+      let catLimpa = "DEF";
+      if (isPropaganda) { statusBanco = "Autuação (Propaganda Irregular)"; catLimpa = "Propaganda Irregular (Produto Registrado)"; }
+      else if (isAmbos) { statusBanco = "Ilegal/Apreensão e Propaganda"; catLimpa = "Tabaco Irregular (Sem Registro + Propaganda)"; }
+      else if (isIlegal) { statusBanco = "Ilegal/Apreensão"; catLimpa = "Tabaco Irregular (Sem Registro)"; }
+
+      novoItem = {
+        categoria: catLimpa, tipo: limparEmojisTipo(infTipo), produto: infProd,
+        status: statusBanco, cnpj: cnpjBancoSelecionado.replace(" [Ilegal]", ""),
+        quantidade: infQtd, hora: horaAtual,
+        foto1_base64: foto1Preview, foto2_base64: foto2Preview
+      };
+    }
+
+    if (lojaAlvoEdicaoIdx !== null) {
+      setHistoricoOps(prev => {
+        const copia = [...prev];
+        copia[opSelecionadaIdx].lojas[lojaAlvoEdicaoIdx].itens.push(novoItem);
+        return copia;
+      });
+    } else {
+      setLojaAtiva((prev: any) => ({ ...prev, itens: [...prev.itens, novoItem] }));
+    }
+
+    setShowModalInfracao(false);
+    limparFormularioInfracao();
+  };
+
+  const finalizarOperacaoTotal = async () => {
+    if (lojasAuditadas.length === 0) return;
+    setIsSyncing(true);
+    const novaOpCompleta = {
+      operacao_id: operacaoId,
+      fiscal: fiscalName,
+      data_hora: new Date().toISOString(),
+      lojas: lojasAuditadas
+    };
+
+    try {
+      const res = await fetch('http://127.0.0.1:8000/api/salvar-operacao', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(novaOpCompleta)
+      });
+      if (res.ok) {
+        const respData = await res.json();
+        await registrarLog(fiscalName, 'Operação Finalizada', `Salvou ${respData.itens_salvos || 0} infrações na ${operacaoId}.`);
+        setHistoricoOps(prev => [novaOpCompleta, ...prev]);
+        setOpSelecionadaIdx(0);
+        setOperacaoId('');
+        setLojasAuditadas([]);
+        setActiveTab('historico');
+      }
+    } catch (e) {
+      alert('Erro de conexão com a API Python.');
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  const atualizarItemHistorico = (lojaIdx: number, itemIdx: number, campo: string, valor: any) => {
+    setHistoricoOps(prev => {
+      const copia = [...prev];
+      copia[opSelecionadaIdx].lojas[lojaIdx].itens[itemIdx][campo] = valor;
+      return copia;
+    });
+  };
+
+  const removerItemHistorico = (lojaIdx: number, itemIdx: number) => {
+    setHistoricoOps(prev => {
+      const copia = [...prev];
+      copia[opSelecionadaIdx].lojas[lojaIdx].itens.splice(itemIdx, 1);
+      return copia;
+    });
+  };
+
+  const adicionarNovaLojaNoHistorico = () => {
+    const nome = window.prompt("Digite o nome/endereço do estabelecimento para adicionar a esta operação:");
+    if (!nome || !nome.trim()) return;
+    setHistoricoOps(prev => {
+      const copia = [...prev];
+      const proxNum = copia[opSelecionadaIdx].lojas.length + 1;
+      copia[opSelecionadaIdx].lojas.push({ numero: proxNum, nome: nome.trim(), itens: [] });
+      return copia;
+    });
+  };
+
+  const sincronizarEdicaoNuvem = async () => {
+    const opAtual = historicoOps[opSelecionadaIdx];
+    if (!opAtual) return;
+    setIsSyncing(true);
+    try {
+      const res = await fetch('http://127.0.0.1:8000/api/salvar-operacao', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          operacao_id: opAtual.operacao_id,
+          fiscal: fiscalName,
+          lojas: opAtual.lojas
+        })
+      });
+      if (res.ok) {
+        await registrarLog(fiscalName, 'Edição Sincronizada', `Atualizou a operação ${opAtual.operacao_id}`);
+        alert('✅ Edição sincronizada com sucesso na Nuvem!');
+      }
+    } catch (e) {
+      alert('Erro ao sincronizar edição.');
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  const excluirOperacaoHistorico = async () => {
+    const opAtual = historicoOps[opSelecionadaIdx];
+    if (!opAtual) return;
+    if (!window.confirm(`Tem certeza que deseja excluir permanentemente a operação ${opAtual.operacao_id}?`)) return;
+
+    try {
+      await fetch(`http://127.0.0.1:8000/api/operacoes/${opAtual.operacao_id}`, { method: 'DELETE' });
+      await registrarLog(fiscalName, 'Operação Excluída', `Removeu a ${opAtual.operacao_id}`);
+      setHistoricoOps(prev => prev.filter((_, idx) => idx !== opSelecionadaIdx));
+      setOpSelecionadaIdx(0);
+    } catch (e) {
+      alert('Erro ao excluir operação.');
+    }
+  };
+
+  const baixarArquivoOperacao = async (tipo: 'pdf' | 'excel') => {
+    const opAtual = historicoOps[opSelecionadaIdx];
+    if (!opAtual) return;
+    setBaixandoArquivo(true);
+    try {
+      const rota = tipo === 'pdf' ? 'exportar-pdf' : 'exportar-excel';
+      const res = await fetch(`http://127.0.0.1:8000/api/${rota}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          operacao_id: opAtual.operacao_id,
+          fiscal: opAtual.fiscal || fiscalName,
+          lojas: opAtual.lojas
+        })
+      });
+      if (res.ok) {
+        const blob = await res.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${opAtual.operacao_id}.${tipo === 'pdf' ? 'pdf' : 'xlsx'}`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        window.URL.revokeObjectURL(url);
+      } else {
+        alert("Erro ao gerar arquivo no servidor.");
+      }
+    } catch (e) {
+      alert("Falha de conexão ao baixar documento.");
+    } finally {
+      setBaixandoArquivo(false);
+    }
+  };
+
+  const handleCaptureFoto = (e: any, numFoto: number) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        if (numFoto === 1) setFoto1Preview(reader.result as string);
+        if (numFoto === 2) {
+          setFoto2Preview(reader.result as string);
+          setOcrFeedback('');
+        }
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  // ==========================================
+  // 7. ASSISTENTE JURÍDICO (IA)
+  // ==========================================
+  const [prompt, setPrompt] = useState('');
+  const [messages, setMessages] = useState([
+    { role: 'assistant', content: 'Olá! Sou o Motor Jurídico Híbrido da ANVISA (Ollama). Como posso ajudar na fiscalização hoje?', dossie: '' }
+  ]);
+  const [loadingIA, setLoadingIA] = useState(false);
+
+  const enviarMensagem = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!prompt.trim()) return;
+    setMessages((prev) => [...prev, { role: 'user', content: prompt, dossie: '' }]);
+    setPrompt('');
+    setLoadingIA(true);
+
+    try {
+      const res = await fetch('http://127.0.0.1:8000/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt: prompt }),
+      });
+      if (!res.ok) throw new Error('Erro API');
+      const data = await res.json();
+      setMessages((prev) => [...prev, { role: 'assistant', dossie: data.dossie_banco, content: data.parecer_ia }]);
+    } catch (error) {
+      setMessages((prev) => [...prev, { role: 'assistant', content: '⚠️ Erro de conexão com a API Python na porta 8000.', dossie: '' }]);
+    } finally {
+      setLoadingIA(false);
+    }
+  };
+
+  const menuItems = [
+    { id: 'dashboard', label: 'Dashboard Geral (BI)', icon: <BarChart3 size={20} /> },
+    { id: 'cadastro', label: 'Consulta e Cadastro', icon: <Search size={20} /> },
+    { id: 'fiscalizacao', label: 'Nova Fiscalização', icon: <ClipboardCheck size={20} /> },
+    { id: 'historico', label: 'Histórico / Edição', icon: <FolderOpen size={20} /> },
+    { id: 'ia', label: 'Assistente Jurídico (IA)', icon: <Bot size={20} /> },
+    { id: 'logs', label: 'Monitoramento (Logs)', icon: <Eye size={20} /> },
+  ];
+
+  // ==========================================
+  // TELA DE LOGIN
+  // ==========================================
+  if (!isAuthenticated) {
+    return (
+      <div className="flex min-h-screen bg-white font-sans">
+        <div className="hidden lg:flex w-1/2 bg-[#0A1128] relative overflow-hidden flex-col justify-between p-12">
+          <div className="absolute top-0 left-0 w-full h-full opacity-20 bg-[radial-gradient(ellipse_at_top_right,_var(--tw-gradient-stops))] from-blue-400 via-transparent to-transparent"></div>
+          <div className="relative z-10">
+            <div className="flex items-center gap-3 text-white text-2xl font-bold mb-8">
+              <ShieldCheck size={36} className="text-green-500" /> ANVISA | GGTAB
+            </div>
+            <h1 className="text-5xl font-bold text-white leading-tight mb-6">
+              Inteligência Artificial &<br/>BI em Tempo Real.
+            </h1>
+            <p className="text-slate-400 text-lg max-w-md">
+              Plataforma integrada de fiscalização sanitária, analytics executivo, leitura OCR de CNPJs e geração automática de Autos de Infração.
+            </p>
+          </div>
+          <div className="relative z-10 text-slate-500 text-sm">© 2026 Ministério da Saúde - ANVISA</div>
+        </div>
+
+        <div className="w-full lg:w-1/2 flex items-center justify-center p-8 bg-slate-50">
+          <div className="w-full max-w-md bg-white p-10 rounded-3xl shadow-lg border border-slate-100">
+            <h2 className="text-2xl font-bold text-slate-800 mb-2">Acesso ao Servidor Único</h2>
+            <p className="text-slate-500 text-sm mb-8">Insira as suas credenciais operacionais para continuar.</p>
+            {loginError && (
+              <div className="mb-6 p-4 bg-red-50 border border-red-200 text-red-600 rounded-xl text-sm flex items-center gap-2">
+                <AlertTriangle size={18} /> {loginError}
+              </div>
+            )}
+            <form onSubmit={handleLogin} className="space-y-5">
+              <div>
+                <label className="text-sm font-medium text-slate-700">Seu Nome Completo</label>
+                <div className="relative mt-1">
+                  <div className="absolute inset-y-0 left-0 pl-4 flex items-center text-slate-400"><BadgeCheck size={18} /></div>
+                  <input type="text" value={inputName} onChange={e => setInputName(e.target.value)} className="w-full pl-11 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-blue-600" placeholder="Ex: Gabriel de Oliveira Jesus" required />
+                </div>
+              </div>
+              <div>
+                <label className="text-sm font-medium text-slate-700">Login</label>
+                <div className="relative mt-1">
+                  <div className="absolute inset-y-0 left-0 pl-4 flex items-center text-slate-400"><User size={18} /></div>
+                  <input type="text" value={inputUser} onChange={e => setInputUser(e.target.value)} className="w-full pl-11 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-blue-600" placeholder="GGTAB" required />
+                </div>
+              </div>
+              <div>
+                <label className="text-sm font-medium text-slate-700">Senha</label>
+                <div className="relative mt-1">
+                  <div className="absolute inset-y-0 left-0 pl-4 flex items-center text-slate-400"><Lock size={18} /></div>
+                  <input type="password" value={inputPass} onChange={e => setInputPass(e.target.value)} className="w-full pl-11 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-blue-600" placeholder="••••••••" required />
+                </div>
+              </div>
+              <button type="submit" disabled={isLoggingIn} className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3.5 rounded-xl transition-all shadow-lg flex justify-center items-center gap-2 mt-4">
+                {isLoggingIn ? <div className="w-5 h-5 border-2 border-t-transparent rounded-full animate-spin"></div> : <><LogIn size={20} /> Entrar no Sistema</>}
+              </button>
+            </form>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const opEmEdicao = historicoOps[opSelecionadaIdx];
+  const coresDonut = ['#2563EB', '#DC2626', '#D97706', '#059669', '#7C3AED'];
+
+  // ==========================================
+  // PAINEL PRINCIPAL
+  // ==========================================
+  return (
+    <div className="flex h-screen bg-slate-50 font-sans text-slate-800">
+      
+      {/* SIDEBAR */}
+      <aside className="w-72 bg-[#0A1128] text-slate-300 flex flex-col shadow-2xl z-20">
+        <div className="p-6 border-b border-slate-800">
+          <div className="text-xs font-bold tracking-wider text-slate-500 mb-2 uppercase">Fiscal Ativo</div>
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-full bg-blue-600 flex items-center justify-center text-white font-bold shadow-md">
+              {fiscalName.charAt(0).toUpperCase()}
+            </div>
+            <div>
+              <div className="text-white font-semibold text-sm leading-tight truncate w-40">{fiscalName}</div>
+              <div className="flex items-center gap-1 mt-1 text-[11px] text-emerald-400">
+                <div className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse"></div> Nuvem Ativa
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="p-6 flex-1 flex flex-col">
+          <div className="flex items-center gap-3 text-white text-xl font-bold mb-8">
+            <ShieldCheck size={28} className="text-green-500" /> Painel GGTAB
+          </div>
+          <nav className="space-y-2 flex-1">
+            {menuItems.map((item) => (
+              <button
+                key={item.id}
+                onClick={() => setActiveTab(item.id)}
+                className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${
+                  activeTab === item.id ? 'bg-blue-600 text-white font-semibold shadow-md' : 'hover:bg-slate-800 hover:text-white'
+                }`}
+              >
+                <span className={activeTab === item.id ? 'text-white' : 'text-green-500'}>{item.icon}</span>
+                {item.label}
+              </button>
+            ))}
+          </nav>
+        </div>
+
+        <div className="p-6 border-t border-slate-800">
+          <button onClick={handleLogout} className="w-full flex items-center justify-center gap-2 py-3 px-4 rounded-xl border border-slate-700 text-slate-300 hover:bg-red-500/10 hover:text-red-400 transition-colors">
+            <LogOut size={18} /> Sair do Sistema
+          </button>
+        </div>
+      </aside>
+
+      {/* CONTEÚDO */}
+      <main className="flex-1 flex flex-col overflow-hidden relative">
+        <header className="bg-white border-b border-slate-200 p-6 flex items-center justify-between z-10">
+          <h2 className="text-2xl font-bold text-slate-800">{menuItems.find(m => m.id === activeTab)?.label}</h2>
+          {operacaoId && (
+            <div className="flex items-center gap-2 bg-red-50 border border-red-200 px-4 py-1.5 rounded-full">
+              <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse"></div>
+              <span className="text-xs font-bold text-red-600 font-mono">OPERAÇÃO ATIVA: {operacaoId}</span>
+            </div>
+          )}
+        </header>
+
+        <div className="flex-1 overflow-y-auto p-8 relative">
+          
+          {/* ================================================================= */}
+          {/* ABA 1: DASHBOARD EXECUTIVO DE INTELIGÊNCIA (BI INTERATIVO)        */}
+          {/* ================================================================= */}
+          {activeTab === 'dashboard' && (
+            <div className="space-y-8 animate-in fade-in duration-300">
+              
+              {/* Barra de Filtros Globais (Slicers) */}
+              <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 flex flex-col xl:flex-row items-stretch xl:items-center justify-between gap-4">
+                <div className="flex items-center gap-3">
+                  <div className="p-2.5 bg-blue-50 text-blue-600 rounded-xl"><Filter size={20} /></div>
+                  <div>
+                    <h3 className="text-sm font-bold text-slate-800">Filtros Dinâmicos de Inteligência (BI)</h3>
+                    <p className="text-xs text-slate-500">Cruze dados em tempo real por operação ou modalidade de infração.</p>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-3">
+                  <select 
+                    value={filtroOperacaoBI} 
+                    onChange={e => setFiltroOperacaoBI(e.target.value)}
+                    className="p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-semibold text-slate-700 outline-none focus:ring-2 focus:ring-blue-600"
+                  >
+                    <option value="TODAS">🌐 Todas as Operações ({biAnalytics.listaOpsDisponiveis.length})</option>
+                    {biAnalytics.listaOpsDisponiveis.map((opId, idx) => (
+                      <option key={idx} value={opId}>📁 {opId}</option>
+                    ))}
+                  </select>
+
+                  <select 
+                    value={filtroNaturezaBI} 
+                    onChange={e => setFiltroNaturezaBI(e.target.value)}
+                    className="p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-semibold text-slate-700 outline-none focus:ring-2 focus:ring-blue-600"
+                  >
+                    <option value="TODAS">⚖️ Todas as Modalidades de Infração</option>
+                    <option value="Apreensão de DEF (Vape/Pod)">💨 Apreensão de DEF (Vape/Pod)</option>
+                    <option value="Apreensão de Tabaco s/ Registro">🍂 Apreensão de Tabaco s/ Registro</option>
+                    <option value="Autuação (Propaganda Irregular)">📢 Autuação (Propaganda Irregular)</option>
+                    <option value="Apreensão + Propaganda Ilegal">🚨 Apreensão + Propaganda Ilegal</option>
+                  </select>
+
+                  <button onClick={carregarDashboard} className="flex items-center gap-2 text-sm bg-blue-600 hover:bg-blue-700 text-white px-4 py-2.5 rounded-xl font-bold shadow-sm transition-all">
+                    <Activity size={16} /> Atualizar BI
+                  </button>
+                </div>
+              </div>
+
+              {/* 4 KPI Cards Executivos */}
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">
+                <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 flex flex-col justify-between">
+                  <div className="flex justify-between items-start mb-4">
+                    <div className="p-3 bg-blue-50 text-blue-600 rounded-xl"><ClipboardCheck size={24} /></div>
+                    <span className="text-xs font-bold text-blue-600 bg-blue-50 px-2.5 py-1 rounded-full">Ativo</span>
+                  </div>
+                  <div>
+                    <h3 className="text-3xl font-extrabold text-slate-800 mb-1">{biAnalytics.totalOperacoes}</h3>
+                    <p className="text-sm font-medium text-slate-500">Operações Analisadas</p>
+                  </div>
+                </div>
+
+                <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 flex flex-col justify-between">
+                  <div className="flex justify-between items-start mb-4">
+                    <div className="p-3 bg-indigo-50 text-indigo-600 rounded-xl"><Store size={24} /></div>
+                    <span className="text-xs font-bold text-indigo-600 bg-indigo-50 px-2.5 py-1 rounded-full">Campo</span>
+                  </div>
+                  <div>
+                    <h3 className="text-3xl font-extrabold text-slate-800 mb-1">{biAnalytics.totalLojas}</h3>
+                    <p className="text-sm font-medium text-slate-500">Estabelecimentos Fiscalizados</p>
+                  </div>
+                </div>
+
+                <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 flex flex-col justify-between">
+                  <div className="flex justify-between items-start mb-4">
+                    <div className="p-3 bg-emerald-50 text-emerald-600 rounded-xl"><PackageSearch size={24} /></div>
+                    <span className="text-xs font-bold text-emerald-600 bg-emerald-50 px-2.5 py-1 rounded-full">Volume</span>
+                  </div>
+                  <div>
+                    <h3 className="text-3xl font-extrabold text-slate-800 mb-1">{biAnalytics.totalItens.toLocaleString('pt-BR')}</h3>
+                    <p className="text-sm font-medium text-slate-500">Unidades / Peças Auditadas</p>
+                  </div>
+                </div>
+
+                <div className="bg-white p-6 rounded-2xl shadow-sm border border-red-200 bg-gradient-to-br from-white to-red-50/40 flex flex-col justify-between relative overflow-hidden">
+                  <div className="flex justify-between items-start mb-4 relative z-10">
+                    <div className="p-3 bg-red-100 text-red-600 rounded-xl"><AlertTriangle size={24} /></div>
+                    <span className="text-xs font-bold text-red-700 bg-red-100 px-2.5 py-1 rounded-full">Alerta GGTAB</span>
+                  </div>
+                  <div className="relative z-10">
+                    <h3 className="text-3xl font-extrabold text-red-700 mb-1">{biAnalytics.totalInfracoes.toLocaleString('pt-BR')}</h3>
+                    <p className="text-sm font-semibold text-red-600/90">Total de Infrações / Apreensões</p>
+                  </div>
+                </div>
+              </div>
+
+              {/* ÁREA DOS GRÁFICOS EXECUTIVOS DE BI */}
+              {!biAnalytics.temDadosDetalhados ? (
+                <div className="bg-white p-12 rounded-3xl shadow-sm border border-slate-200 text-center">
+                  <BarChart3 size={48} className="mx-auto text-slate-300 mb-3" />
+                  <h3 className="text-xl font-bold text-slate-800 mb-1">Aguardando Dados para os Gráficos</h3>
+                  <p className="text-slate-500 max-w-md mx-auto">
+                    Registre infrações na aba <strong>"Nova Fiscalização"</strong> para visualizar os gráficos dinâmicos por Produto, Empresa/Fabricante e Tipo de Apreensão.
+                  </p>
+                </div>
+              ) : (
+                <>
+                  {/* LINHA 1 DE GRÁFICOS: ROSCA (TIPO DE APREENSÃO) + TOP PRODUTOS */}
+                  <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+                    
+                    {/* GRÁFICO 1: DONUT CHART - NATUREZA DAS APREENSÕES */}
+                    <div className="lg:col-span-5 bg-white p-6 rounded-2xl shadow-sm border border-slate-200 flex flex-col justify-between">
+                      <div>
+                        <div className="flex items-center justify-between mb-1">
+                          <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2">
+                            <PieChart size={20} className="text-blue-600" /> Distribuição por Tipo de Infração
+                          </h3>
+                        </div>
+                        <p className="text-xs text-slate-500 mb-6">Proporção de unidades apreendidas ou autuadas por enquadramento</p>
+                      </div>
+
+                      <div className="flex flex-col sm:flex-row items-center justify-around gap-6 my-auto">
+                        {/* SVG Donut */}
+                        <div className="relative w-44 h-44 flex items-center justify-center">
+                          <svg className="w-full h-full -rotate-90" viewBox="0 0 100 100">
+                            <circle cx="50" cy="50" r="38" fill="transparent" stroke="#F1F5F9" strokeWidth="14" />
+                            {(() => {
+                              let acumulado = 0;
+                              const circunferencia = 2 * Math.PI * 38;
+                              return biAnalytics.porModalidade.map((item, idx) => {
+                                const pct = biAnalytics.totalItens > 0 ? item.qtd / biAnalytics.totalItens : 0;
+                                const compArco = pct * circunferencia;
+                                const offset = -acumulado * circunferencia;
+                                acumulado += pct;
+                                return (
+                                  <circle
+                                    key={idx}
+                                    cx="50"
+                                    cy="50"
+                                    r="38"
+                                    fill="transparent"
+                                    stroke={coresDonut[idx % coresDonut.length]}
+                                    strokeWidth="14"
+                                    strokeDasharray={`${compArco} ${circunferencia}`}
+                                    strokeDashoffset={offset}
+                                    className="transition-all duration-700"
+                                  />
+                                );
+                              });
+                            })()}
+                          </svg>
+                          <div className="absolute inset-0 flex flex-col items-center justify-center text-center">
+                            <span className="text-2xl font-extrabold text-slate-800">{biAnalytics.totalItens}</span>
+                            <span className="text-[10px] font-bold uppercase text-slate-400">Peças</span>
+                          </div>
+                        </div>
+
+                        {/* Legenda Detalhada */}
+                        <div className="space-y-3 flex-1 w-full">
+                          {biAnalytics.porModalidade.map((item, idx) => {
+                            const pct = biAnalytics.totalItens > 0 ? Math.round((item.qtd / biAnalytics.totalItens) * 100) : 0;
+                            return (
+                              <div key={idx} className="flex items-center justify-between text-xs bg-slate-50 p-2.5 rounded-xl border border-slate-100">
+                                <div className="flex items-center gap-2.5 truncate pr-2">
+                                  <span className="w-3 h-3 rounded-full shrink-0" style={{ backgroundColor: coresDonut[idx % coresDonut.length] }}></span>
+                                  <span className="font-semibold text-slate-700 truncate">{item.nome}</span>
+                                </div>
+                                <div className="font-mono font-bold text-slate-900 shrink-0">
+                                  {item.qtd} <span className="text-slate-400 font-normal">({pct}%)</span>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* GRÁFICO 2: RANKING TOP PRODUTOS / MARCAS AUTUADAS */}
+                    <div className="lg:col-span-7 bg-white p-6 rounded-2xl shadow-sm border border-slate-200 flex flex-col justify-between">
+                      <div>
+                        <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2 mb-1">
+                          <TrendingUp size={20} className="text-red-600" /> Top Produtos e Marcas Apreendidas
+                        </h3>
+                        <p className="text-xs text-slate-500 mb-6">Ranking de marcas com maior volume de unidades retidas nas operações</p>
+
+                        <div className="space-y-4">
+                          {biAnalytics.topProdutos.map((prod, idx) => {
+                            const maxQtd = biAnalytics.topProdutos[0]?.qtd || 1;
+                            const larguraPct = Math.max(8, Math.round((prod.qtd / maxQtd) * 100));
+                            return (
+                              <div key={idx} className="space-y-1.5">
+                                <div className="flex justify-between items-center text-sm">
+                                  <span className="font-bold text-slate-700 truncate max-w-[75%]">
+                                    #{idx + 1} — {prod.nome}
+                                  </span>
+                                  <span className="font-mono font-extrabold text-blue-700 bg-blue-50 px-2.5 py-0.5 rounded-lg text-xs">
+                                    {prod.qtd.toLocaleString('pt-BR')} und.
+                                  </span>
+                                </div>
+                                <div className="w-full h-3 bg-slate-100 rounded-full overflow-hidden">
+                                  <div 
+                                    className="h-full bg-gradient-to-r from-blue-700 to-blue-500 rounded-full transition-all duration-700"
+                                    style={{ width: `${larguraPct}%` }}
+                                  ></div>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    </div>
+
+                  </div>
+
+                  {/* LINHA 2 DE GRÁFICOS: EMPRESAS / FABRICANTES + SUBCLASSES DE PRODUTO */}
+                  <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+                    
+                    {/* GRÁFICO 3: INTELIGÊNCIA POR EMPRESA / FABRICANTE / CNPJ */}
+                    <div className="lg:col-span-6 bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
+                      <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2 mb-1">
+                        <Building2 size={20} className="text-indigo-600" /> Incidência por Empresa / Fabricante
+                      </h3>
+                      <p className="text-xs text-slate-500 mb-6">Volume acumulado por fabricante registrado ou origem clandestina</p>
+
+                      <div className="space-y-4">
+                        {biAnalytics.topEmpresas.map((emp, idx) => {
+                          const maxQtd = biAnalytics.topEmpresas[0]?.qtd || 1;
+                          const larguraPct = Math.max(8, Math.round((emp.qtd / maxQtd) * 100));
+                          const isClandestino = emp.nome.toLowerCase().includes('clandestino') || emp.nome.toLowerCase().includes('ilegal');
+                          return (
+                            <div key={idx} className="p-3 bg-slate-50 rounded-xl border border-slate-100 space-y-2">
+                              <div className="flex justify-between items-start gap-2">
+                                <div>
+                                  <div className="text-xs font-bold text-slate-800">{emp.nome}</div>
+                                  <div className="text-[11px] font-mono text-slate-400">CNPJ: {emp.extra || 'Não Identificado'}</div>
+                                </div>
+                                <span className={`px-2.5 py-1 rounded-lg text-xs font-mono font-bold shrink-0 ${
+                                  isClandestino ? 'bg-red-100 text-red-700' : 'bg-indigo-100 text-indigo-700'
+                                }`}>
+                                  {emp.qtd.toLocaleString('pt-BR')} und.
+                                </span>
+                              </div>
+                              <div className="w-full h-2 bg-slate-200 rounded-full overflow-hidden">
+                                <div 
+                                  className={`h-full rounded-full transition-all duration-700 ${isClandestino ? 'bg-red-500' : 'bg-indigo-600'}`}
+                                  style={{ width: `${larguraPct}%` }}
+                                ></div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {/* GRÁFICO 4: MAPEAMENTO POR SUBCLASSE DE PRODUTO & TOP LOJAS */}
+                    <div className="lg:col-span-6 bg-white p-6 rounded-2xl shadow-sm border border-slate-200 flex flex-col justify-between space-y-6">
+                      <div>
+                        <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2 mb-1">
+                          <BarChart3 size={20} className="text-emerald-600" /> Volume por Subclasse de Produto
+                        </h3>
+                        <p className="text-xs text-slate-500 mb-5">Comparativo entre Vapes/Pods, Cigarros, Narguilé, Palheiros e Charutos</p>
+
+                        <div className="space-y-3.5">
+                          {biAnalytics.porTipo.map((tp, idx) => {
+                            const maxQtd = biAnalytics.porTipo[0]?.qtd || 1;
+                            const larguraPct = Math.max(8, Math.round((tp.qtd / maxQtd) * 100));
+                            return (
+                              <div key={idx} className="space-y-1">
+                                <div className="flex justify-between text-xs font-bold text-slate-700">
+                                  <span>{tp.nome}</span>
+                                  <span className="font-mono text-emerald-700">{tp.qtd} peças</span>
+                                </div>
+                                <div className="w-full h-2.5 bg-slate-100 rounded-full overflow-hidden">
+                                  <div 
+                                    className="h-full bg-emerald-500 rounded-full transition-all duration-700"
+                                    style={{ width: `${larguraPct}%` }}
+                                  ></div>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      {/* Mini Ranking de Estabelecimentos Críticos */}
+                      <div className="pt-4 border-t border-slate-100">
+                        <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-3">
+                          🏬 Estabelecimentos com Maior Volume de Infrações
+                        </h4>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                          {biAnalytics.topLojas.slice(0, 4).map((lj, idx) => (
+                            <div key={idx} className="p-2.5 rounded-xl bg-slate-50 border border-slate-200/70 flex items-center justify-between text-xs">
+                              <span className="font-semibold text-slate-700 truncate pr-2">{lj.nome}</span>
+                              <span className="font-mono font-bold text-red-600 bg-red-50 px-2 py-0.5 rounded-md shrink-0">{lj.qtd} und.</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+
+          {/* ABA 2: CONSULTA E CADASTRO */}
+          {activeTab === 'cadastro' && (
+            <div className="space-y-6">
+              <div className="flex flex-col md:flex-row gap-4 items-center justify-between bg-white p-4 rounded-2xl shadow-sm border border-slate-200">
+                <div className="relative w-full md:w-96">
+                  <div className="absolute inset-y-0 left-0 pl-4 flex items-center text-slate-400"><Search size={18} /></div>
+                  <input type="text" placeholder="Pesquisar por marca, CNPJ ou tipo..." value={buscaProduto} onChange={(e) => setBuscaProduto(e.target.value)} className="w-full pl-11 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-blue-600" />
+                </div>
+                <button onClick={() => setShowModalCadastro(true)} className="w-full md:w-auto flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-6 py-2.5 rounded-xl font-medium shadow-md">
+                  <Plus size={18} /> Cadastrar Nova Marca na Nuvem
+                </button>
+              </div>
+
+              <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+                <div className="overflow-x-auto max-h-[68vh]">
+                  <table className="w-full text-left border-collapse">
+                    <thead className="sticky top-0 bg-slate-50 border-b border-slate-200 text-slate-500 text-sm">
+                      <tr>
+                        <th className="p-4 font-semibold">Categoria / Tipo</th>
+                        <th className="p-4 font-semibold">Produto / Marca</th>
+                        <th className="p-4 font-semibold">CNPJ</th>
+                        <th className="p-4 font-semibold text-center">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {produtosFiltradosTabela.map((prod, idx) => (
+                        <tr key={idx} className="hover:bg-slate-50">
+                          <td className="p-4"><div className="text-sm font-medium text-slate-800">{prod.categoria}</div><div className="text-xs text-slate-500">{prod.tipo}</div></td>
+                          <td className="p-4 font-medium text-slate-700">{prod.produto}</td>
+                          <td className="p-4 text-sm text-slate-600 font-mono">{prod.cnpj}</td>
+                          <td className="p-4 text-center">
+                            <span className={`px-3 py-1 rounded-full text-xs font-semibold ${prod.status.includes('Regular') || prod.status.includes('✅') ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>
+                              {prod.status}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ABA 3: NOVA FISCALIZAÇÃO */}
+          {activeTab === 'fiscalizacao' && (
+            <div className="space-y-6">
+              {!operacaoId ? (
+                <div className="bg-white p-12 rounded-3xl shadow-sm border border-slate-200 text-center flex flex-col items-center justify-center min-h-[60vh]">
+                  <div className="w-24 h-24 bg-blue-50 text-blue-600 rounded-full flex items-center justify-center mb-6"><ClipboardCheck size={48} /></div>
+                  <h3 className="text-3xl font-bold text-slate-800 mb-3">Registro de Operação</h3>
+                  <p className="text-slate-500 max-w-md mb-8">Inicie uma nova operação para auditar estabelecimentos, usar o leitor OCR de CNPJ e alimentar o BI em tempo real.</p>
+                  <button onClick={iniciarOperacao} className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-4 px-10 rounded-2xl shadow-lg text-lg">
+                    ▶️ Iniciar Nova Operação de Fiscalização
+                  </button>
+                </div>
+              ) : (
+                <div className="space-y-6">
+                  <div className="flex flex-col md:flex-row items-start md:items-center justify-between bg-white p-6 rounded-2xl shadow-sm border border-slate-200 gap-4">
+                    <div>
+                      <span className="text-xs font-bold text-blue-600 uppercase">Operação Ativa</span>
+                      <h3 className="text-xl font-bold text-slate-800 font-mono">{operacaoId}</h3>
+                      <p className="text-xs text-slate-500 mt-1">Lojas auditadas nesta operação: <strong>{lojasAuditadas.length}</strong></p>
+                    </div>
+                    {!lojaAtiva && (
+                      <div className="flex flex-wrap gap-3">
+                        <button onClick={() => setShowModalLoja(true)} className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-xl font-semibold shadow-md">
+                          📍 Entrar em Novo Estabelecimento
+                        </button>
+                        {lojasAuditadas.length > 0 && (
+                          <button onClick={finalizarOperacaoTotal} disabled={isSyncing} className="bg-emerald-600 hover:bg-emerald-700 text-white px-6 py-3 rounded-xl font-semibold shadow-md flex items-center gap-2">
+                            <CheckCircle size={18} /> 🏁 Finalizar Operação (Gerar PDF / Planilha)
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  {lojaAtiva && (
+                    <div className="bg-white rounded-2xl shadow-sm border border-blue-200 overflow-hidden">
+                      <div className="bg-slate-900 text-white p-6 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                        <div>
+                          <span className="text-xs font-bold text-green-400 uppercase">Auditoria em Andamento</span>
+                          <h3 className="text-2xl font-bold mt-1">🏬 Loja {lojaAtiva.numero} - {lojaAtiva.nome}</h3>
+                        </div>
+                        <div className="flex gap-3">
+                          <button onClick={() => { setLojaAlvoEdicaoIdx(null); setShowModalInfracao(true); }} className="bg-blue-600 hover:bg-blue-500 text-white px-5 py-2.5 rounded-xl font-bold shadow-md">
+                            ➕ Registrar Nova Infração
+                          </button>
+                          <button onClick={encerrarAuditoriaLoja} className="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-600 px-5 py-2.5 rounded-xl font-semibold">
+                            🔒 Encerrar Auditoria nesta Loja
+                          </button>
+                        </div>
+                      </div>
+                      
+                      <div className="p-6">
+                        {lojaAtiva.itens.length === 0 ? (
+                          <div className="py-12 text-center border-2 border-dashed border-slate-200 rounded-xl bg-slate-50 text-slate-500">
+                            Nenhuma infração registrada nesta loja até o momento.
+                          </div>
+                        ) : (
+                          <div className="overflow-x-auto border border-slate-200 rounded-xl">
+                            <table className="w-full text-left border-collapse text-sm">
+                              <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 text-xs uppercase">
+                                <tr>
+                                  <th className="p-4">Produto / Marca</th>
+                                  <th className="p-4">Categoria / Tipo</th>
+                                  <th className="p-4">Status</th>
+                                  <th className="p-4">CNPJ</th>
+                                  <th className="p-4 text-center">Qtd</th>
+                                  <th className="p-4 text-center">Fotos</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-slate-100">
+                                {lojaAtiva.itens.map((item: any, i: number) => (
+                                  <tr key={i} className="hover:bg-slate-50">
+                                    <td className="p-4 font-bold text-slate-800">{item.produto}</td>
+                                    <td className="p-4 text-xs text-slate-500">{item.categoria} • {item.tipo}</td>
+                                    <td className="p-4"><span className="px-2.5 py-1 rounded-full text-xs font-bold bg-red-100 text-red-700">{item.status}</span></td>
+                                    <td className="p-4 font-mono text-slate-600">{item.cnpj}</td>
+                                    <td className="p-4 text-center font-bold">{item.quantidade}</td>
+                                    <td className="p-4 text-center text-xs font-semibold text-emerald-600">
+                                      {(item.foto1_base64 ? 1 : 0) + (item.foto2_base64 ? 1 : 0)} foto(s)
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ABA 4: HISTÓRICO / EDIÇÃO DINÂMICA */}
+          {activeTab === 'historico' && (
+            <div className="space-y-6 animate-in fade-in duration-300">
+              {loadingHistorico ? (
+                <div className="p-12 text-center text-slate-400">Carregando histórico de operações...</div>
+              ) : historicoOps.length === 0 ? (
+                <div className="bg-white p-12 rounded-2xl shadow-sm border border-slate-200 text-center">
+                  <FolderOpen size={48} className="mx-auto text-slate-300 mb-3" />
+                  <h3 className="text-xl font-bold text-slate-800 mb-1">Nenhuma Operação Concluída</h3>
+                  <p className="text-slate-500">Finalize uma operação na aba "Nova Fiscalização" para editá-la e gerar o Auto em PDF e Excel.</p>
+                </div>
+              ) : (
+                <>
+                  <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-4">
+                    <div className="flex-1">
+                      <label className="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-1">Selecione a Operação para Auditar / Exportar</label>
+                      <select 
+                        value={opSelecionadaIdx} 
+                        onChange={e => setOpSelecionadaIdx(parseInt(e.target.value))}
+                        className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl font-mono font-bold text-slate-800 outline-none focus:ring-2 focus:ring-blue-600"
+                      >
+                        {historicoOps.map((op, idx) => (
+                          <option key={idx} value={idx}>
+                            {op.operacao_id} — ({op.lojas?.length || 0} loja(s) | Fiscal: {op.fiscal || fiscalName})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-3">
+                      <button onClick={() => baixarArquivoOperacao('excel')} disabled={baixandoArquivo} className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-5 py-3 rounded-xl shadow-md transition-all disabled:opacity-50">
+                        <FileSpreadsheet size={18} /> 📊 Baixar Planilha (Abas por Loja)
+                      </button>
+
+                      <button onClick={() => baixarArquivoOperacao('pdf')} disabled={baixandoArquivo} className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white font-bold px-5 py-3 rounded-xl shadow-md transition-all disabled:opacity-50">
+                        <FileText size={18} /> 📄 Gerar Auto de Inspeção (PDF)
+                      </button>
+
+                      <button onClick={excluirOperacaoHistorico} className="flex items-center gap-2 bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 font-bold px-4 py-3 rounded-xl transition-all">
+                        <Trash2 size={18} /> Excluir
+                      </button>
+                    </div>
+                  </div>
+
+                  {opEmEdicao && (
+                    <div className="space-y-6">
+                      <div className="flex justify-between items-center">
+                        <h3 className="text-lg font-bold text-slate-700">Estabelecimentos e Produtos da Operação</h3>
+                        <div className="flex gap-3">
+                          <button onClick={adicionarNovaLojaNoHistorico} className="flex items-center gap-2 text-sm bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 font-semibold px-4 py-2 rounded-xl shadow-sm">
+                            <Plus size={16} /> Adicionar Nova Loja
+                          </button>
+                          <button onClick={sincronizarEdicaoNuvem} disabled={isSyncing} className="flex items-center gap-2 text-sm bg-slate-900 hover:bg-slate-800 text-white font-bold px-5 py-2 rounded-xl shadow-md">
+                            <Save size={16} /> 💾 Sincronizar Edição com a Nuvem
+                          </button>
+                        </div>
+                      </div>
+
+                      {opEmEdicao.lojas.map((loja: any, lIdx: number) => (
+                        <div key={lIdx} className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+                          <div className="bg-slate-100 px-6 py-4 border-b border-slate-200 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+                            <div className="flex items-center gap-3">
+                              <Store className="text-blue-600" size={20} />
+                              <span className="font-bold text-slate-800 text-base">🏬 Loja {loja.numero} - {loja.nome}</span>
+                              <span className="text-xs bg-slate-200 text-slate-700 px-2.5 py-0.5 rounded-full font-semibold">{loja.itens.length} item(ns)</span>
+                            </div>
+                            <button 
+                              onClick={() => { setLojaAlvoEdicaoIdx(lIdx); setShowModalInfracao(true); }}
+                              className="flex items-center gap-1.5 text-xs bg-blue-600 hover:bg-blue-700 text-white font-bold px-3.5 py-2 rounded-lg shadow-sm"
+                            >
+                              <Plus size={15} /> Adicionar Produto nesta Loja
+                            </button>
+                          </div>
+
+                          <div className="p-6 space-y-3">
+                            {loja.itens.length === 0 ? (
+                              <div className="text-center py-6 text-slate-400 text-sm">Nenhum produto nesta loja. Clique em "+ Adicionar Produto nesta Loja".</div>
+                            ) : (
+                              loja.itens.map((item: any, iIdx: number) => (
+                                <div key={iIdx} className="grid grid-cols-1 md:grid-cols-12 gap-3 items-center p-3 bg-slate-50 rounded-xl border border-slate-200">
+                                  <div className="md:col-span-5">
+                                    <label className="text-[11px] font-bold text-slate-400 uppercase">Produto / Marca #{iIdx + 1}</label>
+                                    <input type="text" value={item.produto} onChange={e => atualizarItemHistorico(lIdx, iIdx, 'produto', e.target.value)} className="w-full p-2 bg-white border border-slate-200 rounded-lg text-sm font-semibold text-slate-800 mt-0.5" />
+                                  </div>
+                                  <div className="md:col-span-2">
+                                    <label className="text-[11px] font-bold text-slate-400 uppercase">CNPJ</label>
+                                    <input type="text" value={item.cnpj} onChange={e => atualizarItemHistorico(lIdx, iIdx, 'cnpj', e.target.value)} className="w-full p-2 bg-white border border-slate-200 rounded-lg text-sm font-mono text-slate-600 mt-0.5" />
+                                  </div>
+                                  <div className="md:col-span-1">
+                                    <label className="text-[11px] font-bold text-slate-400 uppercase">Qtd</label>
+                                    <input type="number" min={1} value={item.quantidade} onChange={e => atualizarItemHistorico(lIdx, iIdx, 'quantidade', parseInt(e.target.value) || 1)} className="w-full p-2 bg-white border border-slate-200 rounded-lg text-sm font-bold text-center text-slate-800 mt-0.5" />
+                                  </div>
+                                  <div className="md:col-span-3">
+                                    <label className="text-[11px] font-bold text-slate-400 uppercase">Status da Infração</label>
+                                    <select value={item.status} onChange={e => atualizarItemHistorico(lIdx, iIdx, 'status', e.target.value)} className="w-full p-2 bg-white border border-slate-200 rounded-lg text-sm font-semibold text-slate-700 mt-0.5">
+                                      <option value="Ilegal/Apreensão">Ilegal/Apreensão</option>
+                                      <option value="Autuação (Propaganda Irregular)">Autuação (Propaganda Irregular)</option>
+                                      <option value="Ilegal/Apreensão e Propaganda">Ilegal/Apreensão e Propaganda</option>
+                                    </select>
+                                  </div>
+                                  <div className="md:col-span-1 flex justify-end pt-4">
+                                    <button onClick={() => removerItemHistorico(lIdx, iIdx)} className="p-2 text-red-500 hover:bg-red-50 rounded-lg transition-colors" title="Remover Produto">
+                                      <Trash2 size={18} />
+                                    </button>
+                                  </div>
+                                </div>
+                              ))
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          )}
+
+          {/* ABA 5: ASSISTENTE JURÍDICO (IA) */}
+          {activeTab === 'ia' && (
+            <div className="flex flex-col h-[calc(100vh-10rem)]">
+              <div className="flex-1 overflow-y-auto space-y-6 pb-6 pr-4">
+                {messages.map((msg, index) => (
+                  <div key={index} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                    <div className={`max-w-[85%] md:max-w-[75%] p-5 rounded-2xl shadow-sm ${msg.role === 'user' ? 'bg-blue-600 text-white rounded-tr-none' : 'bg-white border border-slate-200 rounded-tl-none'}`}>
+                      {msg.dossie && <div className="mb-4 p-4 bg-slate-50 rounded-xl border border-slate-200 border-l-4 border-l-blue-500 text-sm whitespace-pre-wrap font-mono text-slate-700">{msg.dossie}</div>}
+                      <div className="whitespace-pre-wrap leading-relaxed text-[15px]">{msg.content}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <form onSubmit={enviarMensagem} className="flex gap-3 bg-white p-2 rounded-full border border-slate-300 shadow-sm mt-4">
+                <input type="text" value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="Digite o CNPJ ou a situação..." className="flex-1 px-6 py-3 rounded-full focus:outline-none bg-transparent" disabled={loadingIA} />
+                <button type="submit" disabled={loadingIA || !prompt.trim()} className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-8 rounded-full disabled:opacity-50">Enviar</button>
+              </form>
+            </div>
+          )}
+
+          {/* ABA 6: MONITORAMENTO (LOGS) */}
+          {activeTab === 'logs' && (
+            <div className="space-y-6">
+              <div className="flex justify-between items-center">
+                <p className="text-slate-500">Trilha de auditoria em tempo real das ações realizadas pelos fiscais.</p>
+                <button onClick={carregarLogs} className="bg-white border border-slate-200 hover:bg-slate-50 px-4 py-2 rounded-xl text-sm font-medium shadow-sm">
+                  🔄 Atualizar Trilha
+                </button>
+              </div>
+              <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+                <table className="w-full text-left border-collapse text-sm">
+                  <thead className="bg-slate-50 border-b border-slate-200 text-slate-500">
+                    <tr>
+                      <th className="p-4">Data / Hora</th>
+                      <th className="p-4">Fiscal</th>
+                      <th className="p-4">Ação</th>
+                      <th className="p-4">Detalhes</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {loadingLogs ? (
+                      <tr><td colSpan={4} className="p-8 text-center text-slate-400">Carregando logs...</td></tr>
+                    ) : logsAuditoria.length === 0 ? (
+                      <tr><td colSpan={4} className="p-8 text-center text-slate-400">Nenhum registro encontrado.</td></tr>
+                    ) : (
+                      logsAuditoria.map((log, i) => (
+                        <tr key={i} className="hover:bg-slate-50">
+                          <td className="p-4 font-mono text-xs text-slate-500">{new Date(log.data_hora).toLocaleString('pt-BR')}</td>
+                          <td className="p-4 font-semibold text-slate-800">{log.fiscal}</td>
+                          <td className="p-4"><span className="px-2.5 py-1 bg-blue-50 text-blue-700 rounded-full text-xs font-bold">{log.acao}</span></td>
+                          <td className="p-4 text-slate-600">{log.detalhes}</td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+        </div>
+      </main>
+
+      {/* MODAL 1: CADASTRAR NOVA MARCA GLOBAL */}
+      {showModalCadastro && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-[#111827] w-full max-w-lg rounded-2xl shadow-2xl border border-slate-700 overflow-hidden flex flex-col max-h-[90vh]">
+            <div className="flex items-center justify-between p-6 border-b border-slate-800">
+              <h3 className="text-xl font-bold text-white flex items-center gap-2"><Plus className="text-blue-500" /> Cadastrar Nova Marca no Banco Global</h3>
+              <button onClick={() => setShowModalCadastro(false)} className="text-slate-400 hover:text-white"><X size={24} /></button>
+            </div>
+            <div className="p-6 overflow-y-auto space-y-5">
+              <div>
+                <label className="text-sm font-medium text-slate-300">Categoria Macro</label>
+                <select value={cadMacro} onChange={e => { setCadMacro(e.target.value); setCadTipo(''); }} className="w-full p-3 bg-slate-800 border border-slate-700 rounded-xl text-white mt-1">
+                  <option value="">Selecione...</option>
+                  <option value="💨 DEF (Dispositivos Eletrônicos para Fumar)">💨 DEF (Dispositivos Eletrônicos para Fumar)</option>
+                  <option value="🍂 Tabacos e Derivados (Registrados pela ANVISA) - Propaganda Irregular">🍂 Tabacos e Derivados (Registrados pela ANVISA) - Propaganda Irregular</option>
+                  <option value="🍂 Tabacos e Derivados (Irregulares/Ilegais) - Apreensão">🍂 Tabacos e Derivados (Irregulares/Ilegais) - Apreensão</option>
+                  <option value="🍂 Tabacos e Derivados (Irregulares/Ilegais) - Apreensão e Propaganda">🍂 Tabacos e Derivados (Irregulares/Ilegais) - Apreensão e Propaganda</option>
+                </select>
+              </div>
+              <div>
+                <label className="text-sm font-medium text-slate-300">Tipo de Produto</label>
+                <select value={cadTipo} onChange={e => setCadTipo(e.target.value)} disabled={!cadMacro} className="w-full p-3 bg-slate-800 border border-slate-700 rounded-xl text-white mt-1 disabled:opacity-50">
+                  <option value="">{cadMacro ? "Selecione..." : "Aguardando Categoria..."}</option>
+                  {opcoesTipoCadastro.map((t, i) => <option key={i} value={t}>{t}</option>)}
+                </select>
+              </div>
+              {cadTipo === '+ Criar Novo Tipo' && (
+                <div>
+                  <label className="text-sm font-medium text-slate-300">Nome do Novo Tipo</label>
+                  <input type="text" value={cadNovoTipo} onChange={e => setCadNovoTipo(e.target.value)} className="w-full p-3 bg-slate-800 border border-slate-700 rounded-xl text-white mt-1" />
+                </div>
+              )}
+              <div>
+                <label className="text-sm font-medium text-slate-300">Nome Comercial da Marca</label>
+                <input type="text" value={cadMarca} onChange={e => setCadMarca(e.target.value)} className="w-full p-3 bg-slate-800 border border-slate-700 rounded-xl text-white mt-1" />
+              </div>
+              <div>
+                <label className="text-sm font-medium text-slate-300">CNPJ (Se houver)</label>
+                <input type="text" value={cadCnpj} onChange={e => setCadCnpj(e.target.value)} className="w-full p-3 bg-slate-800 border border-slate-700 rounded-xl text-white font-mono mt-1" />
+              </div>
+            </div>
+            <div className="p-6 border-t border-slate-800 bg-slate-900/50">
+              <button onClick={submeterCadastroGlobal} className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3.5 rounded-xl">Salvar no Banco Global</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 2: NOVA LOJA */}
+      {showModalLoja && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-[#111827] text-white w-full max-w-md rounded-2xl shadow-2xl border border-slate-700 p-6">
+            <div className="flex justify-between items-center mb-6 border-b border-slate-800 pb-4">
+              <h3 className="text-xl font-bold">📍 Registrar Novo Estabelecimento</h3>
+              <button onClick={() => setShowModalLoja(false)} className="text-slate-400 hover:text-white"><X size={22}/></button>
+            </div>
+            <form onSubmit={entrarNaLoja} className="space-y-4">
+              <div>
+                <label className="text-sm font-medium text-slate-300">Nº da Loja</label>
+                <input type="number" min={1} value={formNumLoja} onChange={e => setFormNumLoja(parseInt(e.target.value) || 1)} className="w-full p-3 bg-slate-800 border border-slate-700 rounded-xl mt-1 text-white" />
+              </div>
+              <div>
+                <label className="text-sm font-medium text-slate-300">Endereço ou Nome Fantasia</label>
+                <input type="text" value={formNomeLoja} onChange={e => setFormNomeLoja(e.target.value)} className="w-full p-3 bg-slate-800 border border-slate-700 rounded-xl mt-1 text-white" required />
+              </div>
+              <button type="submit" className="w-full py-3.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold mt-2">Iniciar Auditoria</button>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 3: ADICIONAR INFRAÇÃO COM FOTOS E PYTESSERACT OCR */}
+      {showModalInfracao && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-[#111827] text-white w-full max-w-xl rounded-2xl shadow-2xl border border-slate-700 flex flex-col max-h-[92vh]">
+            <div className="flex justify-between items-center p-6 border-b border-slate-800">
+              <h3 className="text-xl font-bold">📦 Adicionar Nova Infração / Apreensão</h3>
+              <button onClick={() => { setShowModalInfracao(false); limparFormularioInfracao(); }} className="text-slate-400 hover:text-white"><X size={24}/></button>
+            </div>
+            
+            <form onSubmit={confirmarInfracao} className="overflow-y-auto p-6 space-y-5">
+              <div>
+                <label className="text-sm font-medium text-slate-300">Categoria Macro da Infração</label>
+                <select value={infMacro} onChange={e => { setInfMacro(e.target.value); setInfTipo(''); setInfProd(''); }} className="w-full p-3.5 bg-slate-800 border border-slate-700 rounded-xl text-white mt-1">
+                  <option value="">Selecione...</option>
+                  <option value="💨 DEF (Dispositivos Eletrônicos para Fumar)">💨 DEF (Dispositivos Eletrônicos para Fumar)</option>
+                  <option value="🍂 Tabacos e Derivados (Registrados pela ANVISA) - Propaganda Irregular">🍂 Tabacos e Derivados (Registrados pela ANVISA) - Propaganda Irregular</option>
+                  <option value="🍂 Tabacos e Derivados (Irregulares/Ilegais) - Apreensão">🍂 Tabacos e Derivados (Irregulares/Ilegais) - Apreensão</option>
+                  <option value="🍂 Tabacos e Derivados (Irregulares/Ilegais) - Apreensão e Propaganda">🍂 Tabacos e Derivados (Irregulares/Ilegais) - Apreensão e Propaganda</option>
+                </select>
+              </div>
+
+              {infMacro !== '' && (
+                <div>
+                  <label className="text-sm font-medium text-slate-300">Tipo de Produto</label>
+                  <select 
+                    value={infTipo} 
+                    onChange={e => { 
+                      const val = e.target.value;
+                      setInfTipo(val); 
+                      setInfProd(val.includes("⚠️") ? "⚠️ CADASTRAR NOVA MARCA ILEGAL" : '');
+                    }} 
+                    className="w-full p-3.5 bg-slate-800 border border-slate-700 rounded-xl text-white mt-1"
+                  >
+                    <option value="">Selecione...</option>
+                    {opcoesTipoInfracao.map((t, idx) => <option key={idx} value={t}>{t}</option>)}
+                  </select>
+                </div>
+              )}
+
+              {infTipo !== '' && !isNovoTipoSelecionado && (
+                <div>
+                  <label className="text-sm font-medium text-slate-300">{isPropaganda ? "Busque o Produto Registrado" : "Selecione a Marca"}</label>
+                  <select value={infProd} onChange={e => setInfProd(e.target.value)} className="w-full p-3.5 bg-slate-800 border border-slate-700 rounded-xl text-white mt-1">
+                    <option value="">Selecione...</option>
+                    {produtosFiltradosInfracao.map((p, idx) => (
+                      <option key={idx} value={p.produto}>{p.produto} {p.cnpj && p.cnpj !== 'Sem CNPJ' ? `— [${p.cnpj}]` : ''}</option>
+                    ))}
+                    {(isIlegal || isDef || isAmbos) && <option value="⚠️ CADASTRAR NOVA MARCA ILEGAL">⚠️ CADASTRAR NOVA MARCA ILEGAL</option>}
+                  </select>
+                </div>
+              )}
+
+              {infProd !== '' && infProd !== "⚠️ CADASTRAR NOVA MARCA ILEGAL" && !isNovoTipoSelecionado && (
+                <div className="p-3.5 bg-slate-800/80 border border-slate-700 rounded-xl flex items-center justify-between text-sm">
+                  <span className="text-slate-400">CNPJ Vinculado na Base ANVISA:</span>
+                  <span className="font-mono font-bold text-emerald-400">{cnpjBancoSelecionado}</span>
+                </div>
+              )}
+
+              {(infProd !== '' || isNovoTipoSelecionado) && (
+                <div className="space-y-5">
+                  <div>
+                    <label className="text-sm font-medium text-slate-300">Quantidade (Unidades/Peças)</label>
+                    <input type="number" min={1} value={infQtd} onChange={e => setInfQtd(parseInt(e.target.value) || 1)} className="w-full p-3.5 bg-slate-800 border border-slate-700 rounded-xl mt-1 text-white font-bold" />
+                  </div>
+
+                  <div>
+                    <label className="text-sm font-medium text-slate-300 block mb-2">Captura de Evidências (Integradas ao PDF)</label>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <label className="flex flex-col items-center justify-center h-32 border-2 border-slate-700 border-dashed rounded-xl cursor-pointer bg-slate-800/50 hover:bg-slate-800 relative overflow-hidden">
+                        {foto1Preview ? (
+                          <img src={foto1Preview} className="absolute inset-0 w-full h-full object-cover" alt="Foto 1" />
+                        ) : (
+                          <div className="flex flex-col items-center justify-center p-4 text-slate-400 text-center">
+                            <Camera className="w-7 h-7 mb-1.5 text-blue-400" />
+                            <span className="text-xs font-semibold">1 - Embalagem Frontal / Propaganda</span>
+                          </div>
+                        )}
+                        <input type="file" accept="image/*" capture="environment" onChange={e => handleCaptureFoto(e, 1)} className="hidden" />
+                      </label>
+
+                      <label className="flex flex-col items-center justify-center h-32 border-2 border-slate-700 border-dashed rounded-xl cursor-pointer bg-slate-800/50 hover:bg-slate-800 relative overflow-hidden">
+                        {foto2Preview ? (
+                          <img src={foto2Preview} className="absolute inset-0 w-full h-full object-cover" alt="Foto 2" />
+                        ) : (
+                          <div className="flex flex-col items-center justify-center p-4 text-slate-400 text-center">
+                            <Camera className="w-7 h-7 mb-1.5 text-emerald-400" />
+                            <span className="text-xs font-semibold">2 - Lote / CNPJ / Detalhes (OCR)</span>
+                          </div>
+                        )}
+                        <input type="file" accept="image/*" capture="environment" onChange={e => handleCaptureFoto(e, 2)} className="hidden" />
+                      </label>
+                    </div>
+
+                    {foto2Preview && (
+                      <div className="mt-3 space-y-2">
+                        <button type="button" onClick={executarOcrCnpj} disabled={loadingOcr} className="w-full py-2.5 px-4 bg-slate-800 hover:bg-slate-700 border border-emerald-500/40 text-emerald-400 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-all">
+                          <ScanLine size={16} />
+                          {loadingOcr ? "A analisar imagem com Pytesseract..." : "🤖 Tentar Auto-Preencher CNPJ da Foto 2 (Pytesseract OCR)"}
+                        </button>
+                        {ocrFeedback && <div className="text-xs text-center font-medium text-amber-300">{ocrFeedback}</div>}
+                      </div>
+                    )}
+                  </div>
+
+                  {(isNovoTipoSelecionado || infProd === "⚠️ CADASTRAR NOVA MARCA ILEGAL") && (
+                    <div className="p-4 bg-slate-800/60 border border-amber-500/40 rounded-xl space-y-4">
+                      <div className="text-xs font-bold text-amber-400 uppercase">⚠️ Dados da Nova Marca Ilegal</div>
+                      <div>
+                        <label className="text-xs text-slate-300">Nome da Nova Marca Ilegal</label>
+                        <input type="text" value={infNovoNome} onChange={e => setInfNovoNome(e.target.value)} className="w-full p-3 bg-slate-900 border border-slate-700 rounded-xl mt-1 text-white" required />
+                      </div>
+                      <div>
+                        <label className="text-xs text-slate-300">CNPJ Falso / Extraído pelo OCR (Opcional)</label>
+                        <input type="text" value={infNovoCnpj} onChange={e => setInfNovoCnpj(e.target.value)} className="w-full p-3 bg-slate-900 border border-slate-700 rounded-xl mt-1 text-white font-mono" placeholder="Sem CNPJ" />
+                      </div>
+                      {isNovoTipoSelecionado && (
+                        <div>
+                          <label className="text-xs text-slate-300">Tipo Específico</label>
+                          <input type="text" value={infNovoTipo} onChange={e => setInfNovoTipo(e.target.value)} className="w-full p-3 bg-slate-900 border border-slate-700 rounded-xl mt-1 text-white" required />
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  <button type="submit" className="w-full py-4 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold shadow-lg">
+                    ➕ Confirmar Infração
+                  </button>
+                </div>
+              )}
+            </form>
+          </div>
+        </div>
+      )}
+
+    </div>
+  );
+}
