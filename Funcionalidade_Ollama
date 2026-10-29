@@ -1,4 +1,4 @@
-## 2. Código Completo e Comentado da IA Local no `main.py` (v2.0)
+## 2. Código Completo e Comentado da IA Local no `main.py` 
 
 No último `main.py`, a rota `/api/chat` estava sem a fusão em tempo real com a tabela `produtos_customizados` do Supabase e sem o gatilho de **Alerta Vermelho** para CNPJs clandestinos. 
 
